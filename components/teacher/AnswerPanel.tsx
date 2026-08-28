@@ -1,0 +1,1 @@
+export { PaperPreview as AnswerPanel } from "../mapping/PaperPreview";

@@ -1,0 +1,1 @@
+export { QuestionCard } from "../mapping/QuestionCard";
