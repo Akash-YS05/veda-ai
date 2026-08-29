@@ -20,7 +20,7 @@ export function Sidebar({ expanded }: SidebarProps) {
 
 function CompactSidebar() {
   return (
-    <aside className="w-[70px] my-2 mx-2 py-3 px-[12px] flex flex-col items-center gap-10 rounded-[14px] bg-white shadow-[0_1px_40px_rgba(35,35,35,0.18)] z-10 max-[1050px]:hidden">
+    <aside className="w-[65px] my-2 mx-2 py-3 px-[12px] flex flex-col items-center gap-10 rounded-[14px] bg-white shadow-[0_1px_40px_rgba(35,35,35,0.18)] z-10 max-[1050px]:hidden">
       {/* Brand */}
       <div className="w-[42px] h-[42px] rounded-[11px] text-white grid place-items-center bg-[#333] text-[27px] font-extrabold italic shadow-[0_3px_10px_#bbb]">
         <BrandLogo />

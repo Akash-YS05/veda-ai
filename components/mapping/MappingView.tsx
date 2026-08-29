@@ -4,6 +4,9 @@ import { useRef, useState } from "react";
 import type { Question } from "@/lib/types";
 import { PaperPreview } from "./PaperPreview";
 import { QuestionCard } from "./QuestionCard";
+import { Resizer } from "../ui/Resizer";
+import { ChevronRight } from "../ui/ChevronRight";
+import { ChevronLeft } from "../ui/ChevronLeft";
 
 type MappingViewProps = {
   questions: Question[];
@@ -125,7 +128,8 @@ export function MappingView({
         onPointerMove={handleResize}
         type="button"
       >
-        <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[4px] h-[60px] bg-[#d0d0d0] rounded-full group-hover:bg-[#999] transition-colors" />
+        <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center gap-2 h-20 w-3 rounded-[48px] bg-white/80 py-3 px-1 shadow-[0_4px_22.5px_rgba(0,0,0,0.25)]" />
+      
       </button>
 
       {/* Right: Answer Panel */}
@@ -151,24 +155,24 @@ export function MappingView({
             <div className="flex items-center ml-3 bg-[#474747] rounded-lg px-2 text-sm text-gray-200">
               <button
                 aria-label="Previous page"
-                className="w-6 h-8 flex items-center justify-center text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-transparent"
+                className="pt-1 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-transparent"
                 disabled={currentPage <= 1}
                 onClick={handlePrevPage}
                 type="button"
               >
-                ‹
+                <ChevronLeft/>
               </button>
               <span className="px-2 font-medium">
                 Page {currentPage} of {totalPages}
               </span>
               <button
                 aria-label="Next page"
-                className="w-6 h-8 flex items-center justify-center text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-transparent"
+                className="pt-1 text-gray-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed bg-transparent"
                 disabled={currentPage >= totalPages}
                 onClick={handleNextPage}
                 type="button"
               >
-                ›
+                <ChevronRight/>
               </button>
             </div>
           </div>

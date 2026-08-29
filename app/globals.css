@@ -126,7 +126,7 @@ button {
   .mapping-stage-wrapper{
     display:flex;
     flex-direction:column;
-    gap:8px;
+    gap:12px;
     height:calc(100vh - 70px);
     margin-top:8px;
     width:100%;
@@ -137,7 +137,7 @@ button {
   .mapping-stage{
     display:grid;
     grid-template-columns: 0.52fr 0.48fr;
-    gap:12px;
+    gap:2px;
     flex:1;
     min-height:0;
     width:100%;

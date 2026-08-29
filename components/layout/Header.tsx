@@ -14,7 +14,7 @@ type HeaderProps = {
 export function Header({ onBack, isLanding }: HeaderProps) {
   const barClass = isLanding
     ? "h-[41px] px-[18px] flex items-center justify-between rounded-[11px] bg-white"
-    : "h-[54px] px-[26px] flex items-center justify-between rounded-[17px] bg-white shadow-[0_1px_0_rgba(255,255,255,0.9)]";
+    : "px-[18px] flex items-center justify-between rounded-[11px] bg-white shadow-[0_1px_0_rgba(255,255,255,0.9)]";
 
   return (
     <header className={barClass}>
