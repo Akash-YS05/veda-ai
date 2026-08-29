@@ -1,5 +1,10 @@
 "use client";
 
+import type {
+  TextContent,
+  TextItem,
+} from "pdfjs-dist/types/src/display/api";
+
 export interface ProcessedDocument {
   name: string;
   totalPages: number;
@@ -75,9 +80,7 @@ export function fileToDataUrl(file: File): Promise<string> {
  * concatenating strings with spaces. Downstream matching relies on real
  * line boundaries — a naive space-join collapses the page into one line.
  */
-function reconstructPageText(textContent: {
-  items: Array<{ str?: string; transform?: number[]; width?: number }>;
-}): string {
+function reconstructPageText(textContent: TextContent): string {
   interface PositionedItem {
     str: string;
     x: number;
@@ -85,8 +88,11 @@ function reconstructPageText(textContent: {
   }
 
   const items: PositionedItem[] = textContent.items
-    .filter((item): item is { str: string; transform: number[]; width?: number } =>
-      typeof item.str === "string" && item.str.length > 0 && Array.isArray(item.transform),
+    .filter(
+      (item): item is TextItem =>
+        "str" in item &&
+        typeof item.str === "string" &&
+        Array.isArray(item.transform)
     )
     .map((item) => ({
       str: item.str,
@@ -96,14 +102,16 @@ function reconstructPageText(textContent: {
 
   if (items.length === 0) return "";
 
-  const Y_TOLERANCE = 3; // points
-  const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+  const Y_TOLERANCE = 3;
 
+  const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
   const lines: PositionedItem[][] = [];
+
   for (const item of sorted) {
-    const currentLine = lines[lines.length - 1];
-    if (currentLine && Math.abs(currentLine[0].y - item.y) <= Y_TOLERANCE) {
-      currentLine.push(item);
+    const current = lines[lines.length - 1];
+
+    if (current && Math.abs(current[0].y - item.y) <= Y_TOLERANCE) {
+      current.push(item);
     } else {
       lines.push([item]);
     }
@@ -116,9 +124,9 @@ function reconstructPageText(textContent: {
         .map((i) => i.str)
         .join(" ")
         .replace(/[ \t]+/g, " ")
-        .trim(),
+        .trim()
     )
-    .filter((line) => line.length > 0)
+    .filter(Boolean)
     .join("\n");
 }
 
