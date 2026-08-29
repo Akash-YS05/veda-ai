@@ -1,3 +1,5 @@
+"use client";
+
 export interface ProcessedDocument {
   name: string;
   totalPages: number;
@@ -6,12 +8,26 @@ export interface ProcessedDocument {
   pageTexts: string[];
 }
 
+let pdfjsLibPromise: Promise<typeof import("pdfjs-dist")> | null = null;
+
+function getPdfjs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import("pdfjs-dist").then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs",
+        import.meta.url
+      ).toString();
+      return lib;
+    });
+  }
+  return pdfjsLibPromise;
+}
+
 export async function processFileClientSide(
   file: File
 ): Promise<ProcessedDocument> {
   if (file.type.startsWith("image/")) {
     const dataUrl = await fileToDataUrl(file);
-
     return {
       name: file.name,
       totalPages: 1,
@@ -26,7 +42,6 @@ export async function processFileClientSide(
   }
 
   const dataUrl = await fileToDataUrl(file);
-
   return {
     name: file.name,
     totalPages: 1,
@@ -39,23 +54,17 @@ export async function processFileClientSide(
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
-
     reader.readAsDataURL(file);
   });
 }
 
 async function processPdfFile(file: File): Promise<ProcessedDocument> {
   const arrayBuffer = await file.arrayBuffer();
+  const pdfjsLib = await getPdfjs();
 
-  const pdfjsLib = await import("pdfjs-dist/webpack");
-
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
-  });
-
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
   const pdf = await loadingTask.promise;
 
   const pageImages: string[] = [];
@@ -65,7 +74,6 @@ async function processPdfFile(file: File): Promise<ProcessedDocument> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
 
-    // Extract text
     const textContent = await page.getTextContent();
     const pageText = textContent.items
       .map((item: any) => ("str" in item ? item.str : ""))
@@ -74,9 +82,7 @@ async function processPdfFile(file: File): Promise<ProcessedDocument> {
     pageTexts.push(pageText);
     fullText += `\n--- Page ${i} ---\n${pageText}`;
 
-    // Render page to image
     const viewport = page.getViewport({ scale: 1.5 });
-
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
     if (!context) continue;
@@ -87,19 +93,9 @@ async function processPdfFile(file: File): Promise<ProcessedDocument> {
     context.fillStyle = "#fff";
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    await page.render({
-      canvasContext: context,
-      viewport,
-    }).promise;
-
+    await page.render({ canvasContext: context, canvas, viewport }).promise;
     pageImages.push(canvas.toDataURL("image/jpeg", 0.85));
   }
 
-  return {
-    name: file.name,
-    totalPages: pdf.numPages,
-    pageImages,
-    fullText,
-    pageTexts,
-  };
+  return { name: file.name, totalPages: pdf.numPages, pageImages, fullText, pageTexts };
 }
