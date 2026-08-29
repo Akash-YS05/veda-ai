@@ -42,7 +42,7 @@ function ProcessingState() {
       {/* processor / orbit rings */}
       <div className="w-[170px] h-[170px] mx-auto mb-5 relative grid place-items-center">
         <span className="absolute w-[155px] h-[155px] rounded-full border-2 border-[rgba(255,86,35,0.18)] animate-[pulse_1.2s_infinite]" />
-        <span className="absolute w-[115px] h-[115px] rounded-full border-2 border-[rgba(255,86,35,0.34)] animate-[pulse_1.2s_0.3s_infinite]" />
+        <span className="absolute w-[125px] h-[125px] rounded-full border-2 border-[rgba(255,86,35,0.34)] animate-[pulse_1.2s_0.3s_infinite]" />
         <Loader />
       </div>
       <h1 className="m-0 text-[26px] tracking-[-1.6px] font-[750] text-center">Extracting...</h1>

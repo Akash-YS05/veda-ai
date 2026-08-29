@@ -6,8 +6,9 @@ import type { Question, QuestionStatus } from "@/lib/types";
 interface UploadFileMeta {
   name?: string;
   totalPages?: number;
-  /** All page images as base64 data URLs */
   pageImages?: string[];
+  /** Same images with a printed % grid — used for vision model calls only. */
+  annotatedPageImages?: string[];
   pageTexts?: string[];
   fullText?: string;
 }
@@ -16,8 +17,6 @@ interface RequestBody {
   questionFile?: UploadFileMeta | null;
   answerFile?: UploadFileMeta | null;
 }
-
-// ----- Raw shapes the AI returns -----
 
 interface RawQuestion {
   id?: string;
@@ -47,7 +46,6 @@ interface RawMappedQuestion extends RawQuestion {
   };
 }
 
-// Server-only: reads from GROQ_API_KEY env var
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 export async function POST(req: Request) {
@@ -65,11 +63,9 @@ export async function POST(req: Request) {
           isDemo: false,
         });
       }
-      // Groq ran but returned nothing useful — fall through to local
       console.warn("Groq extraction returned no questions, falling back to local parser");
     }
 
-    // Local text-based fallback
     const localResult = parseAndMapDocumentsLocally({
       questionTexts: questionFile?.pageTexts || [],
       answerTexts: answerFile?.pageTexts || [],
@@ -130,17 +126,17 @@ async function tryGroqExtraction(
   const hasQuestionImages = !!(questionFile?.pageImages?.length);
   const hasAnswerImages = !!(answerFile?.pageImages?.length);
 
-  // ------------------------------------------------------------------
-  // STEP 1: Extract questions from the question paper
-  // ------------------------------------------------------------------
   let extractedQuestions: RawQuestion[] = [];
 
   if (hasQuestionText) {
-    // We have real text — use fast text model
     extractedQuestions = await extractQuestionsFromText(groq, questionText);
   } else if (hasQuestionImages) {
-    // Image-only / scanned — use vision model
-    extractedQuestions = await extractQuestionsFromImages(groq, questionFile!.pageImages!);
+    extractedQuestions = await extractQuestionsFromImages(
+      groq,
+      questionFile!.annotatedPageImages?.length
+        ? questionFile!.annotatedPageImages!
+        : questionFile!.pageImages!,
+    );
   }
 
   if (extractedQuestions.length === 0) {
@@ -150,9 +146,6 @@ async function tryGroqExtraction(
 
   console.log(`Step 1: Extracted ${extractedQuestions.length} questions from question paper`);
 
-  // ------------------------------------------------------------------
-  // STEP 2: Map and grade each question against the answer sheet
-  // ------------------------------------------------------------------
   let mappedQuestions: Question[] = [];
 
   if (hasAnswerText) {
@@ -167,11 +160,12 @@ async function tryGroqExtraction(
     mappedQuestions = await mapAnswersFromImages(
       groq,
       extractedQuestions,
-      answerFile!.pageImages!,
+      answerFile!.annotatedPageImages?.length
+        ? answerFile!.annotatedPageImages!
+        : answerFile!.pageImages!,
     );
   }
 
-  // If mapping totally failed, build safe defaults from extracted questions
   if (mappedQuestions.length === 0 && extractedQuestions.length > 0) {
     mappedQuestions = buildDefaultMappedQuestions(extractedQuestions, answerTotalPages);
   }
@@ -207,7 +201,6 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
 Question paper text:
 ${questionText.substring(0, 12000)}`;
 
-  // Only models confirmed working with this API key (no response_format support)
   const models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
   for (const model of models) {
     try {
@@ -216,7 +209,6 @@ ${questionText.substring(0, 12000)}`;
         messages: [{ role: "user", content: prompt }],
         temperature: 0.1,
         max_tokens: 4096,
-        // NOTE: response_format json_object is NOT supported by these models
       });
       const content = completion.choices[0]?.message?.content || "";
       const parsed = safeParseJson(content);
@@ -236,7 +228,6 @@ async function extractQuestionsFromImages(
   groq: Groq,
   pageImages: string[],
 ): Promise<RawQuestion[]> {
-  // Vision models — process up to 4 pages at once to stay within context
   const visionModels = [
     "meta-llama/llama-4-scout-17b-16e-instruct",
     "meta-llama/llama-4-maverick-17b-128e-instruct",
@@ -258,7 +249,6 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
 
   for (const model of visionModels) {
     try {
-      // Build content parts: text prompt + all page images (capped at 8 to avoid rate limits)
       const imagesToSend = pageImages.slice(0, 8);
       const contentParts: Groq.Chat.Completions.ChatCompletionContentPart[] = [
         { type: "text", text: promptText },
@@ -275,7 +265,6 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
         messages: [{ role: "user", content: contentParts }],
         temperature: 0.1,
         max_tokens: 4096,
-        // NOTE: response_format json_object not supported; JSON enforced via prompt
       });
       const content = completion.choices[0]?.message?.content || "";
       const parsed = safeParseJson(content);
@@ -295,11 +284,51 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
 // Step 2 helpers: map + grade answers
 // ---------------------------------------------------------------------------
 
+const MAX_SLOTS_PER_PAGE = 4;
+const SLOT_HEIGHT = 22;
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normaliseForMatch(str: string): string {
+  return str.replace(/\s+/g, " ").trim();
+}
+
+function charIndexToLineFraction(text: string, charIndex: number): number {
+  const upTo = text.slice(0, Math.max(0, charIndex));
+  const lineIndex = (upTo.match(/\n/g) || []).length;
+  const totalLines = Math.max(1, (text.match(/\n/g) || []).length + 1);
+  return lineIndex / totalLines;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 /**
- * Given the per-page texts and an answer string, find which page it's on
- * and compute the y% position from where that text appears in the page.
- * This is far more accurate than asking the AI to guess coordinates.
+ * Size HEIGHT from the actual length of the transcribed answer text
+ * (Groq already gives us this in `extractedAnswerText`), instead of a
+ * fixed lookup keyed only on the question's mark value. `maxMarks` is
+ * used only as a floor so high-mark questions never collapse to a
+ * sliver even if the transcription came back short.
  */
+function estimateHeightFromLength(answerText: string, maxMarks: number): number {
+  const len = (answerText || "").trim().length;
+  const CHARS_PER_PCT = 45;
+  const lengthBasedHeight = Math.round(len / CHARS_PER_PCT);
+  const minFloor = maxMarks >= 5 ? 14 : maxMarks >= 3 ? 10 : 6;
+  return clamp(Math.max(lengthBasedHeight, minFloor), 6, 65);
+}
+
+/** Size WIDTH from answer length — short answers get a narrower box. */
+function estimateWidthFromLength(answerText: string): number {
+  const len = (answerText || "").trim().length;
+  if (len < 20) return 40;
+  if (len < 60) return 65;
+  return 88;
+}
+
 function computeRegionFromPageText(
   pageTexts: string[],
   qNumber: string,
@@ -307,42 +336,54 @@ function computeRegionFromPageText(
   extractedAnswerText: string,
   aiAnswerPage: number,
   maxMarks: number,
+  slotsUsedPerPage: Map<number, number>,
 ): { x: number; y: number; width: number; height: number; page: number } {
   const totalPages = pageTexts.length;
   const targetPage = Math.min(Math.max(1, aiAnswerPage), totalPages || 1);
   const pageText = pageTexts[targetPage - 1] || "";
+  const height = estimateHeightFromLength(extractedAnswerText, maxMarks);
+  const width = estimateWidthFromLength(extractedAnswerText);
+
+  const fallbackRegion = () => {
+    const slot = slotsUsedPerPage.get(targetPage) ?? 0;
+    slotsUsedPerPage.set(targetPage, slot + 1);
+    const wrapped = slot % MAX_SLOTS_PER_PAGE;
+    return { x: 5, y: 5 + wrapped * SLOT_HEIGHT, width, height, page: targetPage };
+  };
 
   if (!pageText.trim()) {
-    // No text on this page — fall back to a safe default
-    return { x: 5, y: 5, width: 88, height: 20, page: targetPage };
+    return fallbackRegion();
   }
 
-  // Build search patterns in priority order:
-  // 1. "Ans N (a)" / "Ans N(a)" / "Answer N (a)" style labels
-  // 2. The first ~40 chars of the extracted answer text itself
-  // 3. Plain "N." / "N)" at start of line
-  const sub = subPart ? subPart.replace(/\.$/, "") : null;
+  const num = escapeRegExp(qNumber);
+  const sub = subPart ? escapeRegExp(subPart.replace(/\.$/, "")) : null;
+
   const searchPatterns: RegExp[] = [];
 
   if (sub) {
     searchPatterns.push(
-      new RegExp(`Ans(?:wer)?\\s*${qNumber}\\s*\\(${sub}\\)`, "i"),
-      new RegExp(`Ans(?:wer)?\\s*${qNumber}${sub}`, "i"),
-      new RegExp(`Q\\.?\\s*${qNumber}\\s*\\(${sub}\\)`, "i"),
-      new RegExp(`\\b${qNumber}\\s*\\(${sub}\\)`, "i"),
+      new RegExp(`Ans(?:wer)?\\.?\\s*${num}\\b\\s*\\(${sub}\\)`, "i"),
+      new RegExp(`Ans(?:wer)?\\.?\\s*${num}\\b${sub}\\b`, "i"),
+      new RegExp(`Q\\.?\\s*${num}\\b\\s*\\(${sub}\\)`, "i"),
+      new RegExp(`(?:^|\\n)\\s*${num}\\b\\s*\\(${sub}\\)`, "im"),
     );
   } else {
     searchPatterns.push(
-      new RegExp(`Ans(?:wer)?\\s*${qNumber}[^(\\w]`, "i"),
-      new RegExp(`Q\\.?\\s*${qNumber}[.):][^(\\w]`, "i"),
-      new RegExp(`(?:^|\\n)\\s*${qNumber}[.):]`, ""),
+      new RegExp(`Ans(?:wer)?\\.?\\s*${num}\\b(?!\\d)[.:)]`, "i"),
+      new RegExp(`Q\\.?\\s*${num}\\b(?!\\d)[.:)]`, "i"),
+      new RegExp(`(?:^|\\n)\\s*${num}\\b(?!\\d)[.:)]`, "im"),
     );
   }
 
-  // Also try matching a snippet of the actual extracted answer text
   if (extractedAnswerText && extractedAnswerText.length > 10) {
-    const snippet = extractedAnswerText.slice(0, 40).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    searchPatterns.push(new RegExp(snippet, "i"));
+    const normalisedPage = normaliseForMatch(pageText);
+    const snippet = escapeRegExp(normaliseForMatch(extractedAnswerText).slice(0, 40));
+    const snippetMatch = new RegExp(snippet, "i").exec(normalisedPage);
+    if (snippetMatch) {
+      const fraction = snippetMatch.index / Math.max(normalisedPage.length, 1);
+      const y = Math.round(5 + fraction * 83);
+      return { x: 5, y: Math.min(y, 92 - height), width, height, page: targetPage };
+    }
   }
 
   let charPos = -1;
@@ -355,26 +396,16 @@ function computeRegionFromPageText(
   }
 
   if (charPos === -1) {
-    // Pattern not found — distribute evenly as a fallback
-    return { x: 5, y: 5, width: 88, height: 20, page: targetPage };
+    return fallbackRegion();
   }
 
-  // Convert character position → y percentage.
-  // Character position in text doesn't map linearly to page height because
-  // of varying line heights, headings, etc. We use a simple linear model
-  // but leave ~10% top margin and ~10% bottom margin for page headers/footers.
-  const usablePageFraction = pageText.length;
-  const rawFraction = charPos / Math.max(usablePageFraction, 1);
-  // Map 0–1 fraction to 5–88% of page height
-  const y = Math.round(5 + rawFraction * 83);
-
-  // Height based on answer complexity
-  const height = maxMarks >= 5 ? 28 : maxMarks >= 3 ? 22 : 16;
+  const fraction = charIndexToLineFraction(pageText, charPos);
+  const y = Math.round(5 + fraction * 83);
 
   return {
     x: 5,
-    y: Math.min(y, 88 - height), // ensure box doesn't overflow page bottom
-    width: 88,
+    y: Math.min(y, 92 - height),
+    width,
     height,
     page: targetPage,
   };
@@ -394,8 +425,6 @@ async function mapAnswersFromText(
     })
     .join("\n");
 
-  // Do NOT ask the AI for region coordinates — it has no spatial information.
-  // We compute accurate regions ourselves from the page text after mapping.
   const prompt = `You are an expert exam grader.
 
 Below are the questions from the exam paper. Map each to the student's answer sheet text, then grade.
@@ -411,7 +440,9 @@ For each question:
 2. Grade: status "good" (full/near-full), "partial", or "missing" (unanswered).
 3. Set answerPage to the 1-indexed page number where the answer appears.
    If the answer spans multiple pages, set answerPages to e.g. [2,3].
-4. Copy the student's answer text verbatim into extractedAnswerText (up to 300 chars).
+4. Copy the student's answer text verbatim into extractedAnswerText, INCLUDING ITS FULL LENGTH
+   (do not truncate short answers or pad short ones) — this is used to size the highlight, so
+   accuracy of length matters as much as content.
 5. Write constructive feedback.
 
 You MUST respond with ONLY valid JSON and absolutely nothing else — no markdown, no code fences, no explanation:
@@ -431,7 +462,6 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
       const rawList = parsed?.questions;
       if (Array.isArray(rawList) && rawList.length > 0) {
         console.log(`Step2/text: mapped ${rawList.length} questions via ${model}`);
-        // Compute accurate regions from page text instead of using AI guesses
         return formatQuestionsWithComputedRegions(
           rawList as RawMappedQuestion[],
           totalPages,
@@ -443,7 +473,6 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
     }
   }
 
-  // Text mapping failed — use defaults
   return buildDefaultMappedQuestions(questions, totalPages);
 }
 
@@ -470,28 +499,30 @@ async function mapAnswersFromImages(
 The exam has these questions:
 ${questionList}
 
-Look at the answer sheet page image(s) carefully. For each question:
+Each image has a printed reference grid: thin red horizontal lines every 10% of the page height, labeled "0%" at the very top down to "100%" at the very bottom, printed on the left edge of each line.
+
+For each question:
 1. Find the student's handwritten answer. Students may answer out of order or skip questions.
 2. Grade: status "good", "partial", or "missing".
-3. Estimate the bounding box of the answer as percentages of the page:
-   - region: { x, y, width, height } where top-left is (0,0) and bottom-right is (100,100)
-   - y = vertical start of answer, height = vertical span of the answer block
-4. Record which page(s) the answer is on (answerPage, answerPages).
+3. Determine the bounding box of the answer using the printed grid labels as your reference — do NOT estimate percentages freehand:
+   - Find the grid line(s) nearest the TOP and BOTTOM of the answer's actual handwriting/text, read their printed percentage labels directly, and use those to set "y" (top) and derive "height" (bottom % minus y).
+   - CRITICAL: the box size MUST vary with how much the student wrote. A one-line or single-word answer should get a short box (roughly height 6-15). A multi-line paragraph should get a taller box that spans all of its lines (height can be 20, 40, 60+ if the answer is long). Do NOT give every answer the same height — measure each one independently off the grid.
+   - x and width should span most of the usable page width (roughly x=5, width=88) for normal paragraph answers, but use a narrower width (e.g. width=30-50) for a short one-line or single-word answer.
+4. Record which page(s) the answer is on (answerPage, answerPages) — this is the image order (1-indexed), not the printed grid.
 5. Write brief, constructive feedback.
-6. Transcribe the answer text (extractedAnswerText, up to 300 chars).
+6. Transcribe the answer text (extractedAnswerText, up to 300 chars) — its actual length should be consistent with the box size you chose.
 
 You MUST respond with ONLY valid JSON and absolutely nothing else — no markdown, no code fences, no explanation:
 {"questions":[{"id":"q1","number":"1","subPart":null,"body":"...","marks":"2 / 2","score":2,"maxMarks":2,"status":"good","answered":true,"page":1,"answerPage":1,"answerPages":[1],"feedback":"...","extractedAnswerText":"...","region":{"x":5,"y":8,"width":88,"height":20,"page":1}}]}
 
 IMPORTANT for sub-parts (e.g. "11 (a)" and "11 (b)"):
-- Each sub-part gets its own separate region object
+- Each sub-part gets its own separate region object, read off the grid independently
 - region.page must equal the answerPage for that specific sub-part
-- Sub-parts answered on the same sheet page must have different y values (one above the other)
+- Sub-parts answered on the same sheet page must have different y values (one above the other) based on where they actually fall on the grid
 - Sub-parts answered on different sheet pages must have different answerPage and region.page`;
 
   for (const model of visionModels) {
     try {
-      // Send up to 6 answer pages (more = better coverage, but heavier request)
       const imagesToSend = answerPageImages.slice(0, 6);
       const contentParts: Groq.Chat.Completions.ChatCompletionContentPart[] = [
         { type: "text", text: promptText },
@@ -508,7 +539,6 @@ IMPORTANT for sub-parts (e.g. "11 (a)" and "11 (b)"):
         messages: [{ role: "user", content: contentParts }],
         temperature: 0.1,
         max_tokens: 6000,
-        // NOTE: response_format json_object not supported; JSON enforced via prompt
       });
       const content = completion.choices[0]?.message?.content || "";
       const parsed = safeParseJson(content);
@@ -529,12 +559,8 @@ IMPORTANT for sub-parts (e.g. "11 (a)" and "11 (b)"):
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Parse JSON from model output — strips markdown code fences if present.
- */
 function safeParseJson(raw: string): Record<string, unknown> | null {
   if (!raw) return null;
-  // Strip ```json ... ``` or ``` ... ``` wrappers
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
@@ -542,7 +568,6 @@ function safeParseJson(raw: string): Record<string, unknown> | null {
   try {
     return JSON.parse(cleaned) as Record<string, unknown>;
   } catch {
-    // Try to extract the first {...} block
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (match) {
       try {
@@ -555,11 +580,6 @@ function safeParseJson(raw: string): Record<string, unknown> | null {
   }
 }
 
-/**
-/**
- * Like formatQuestions but computes regions from actual page text positions
- * instead of trusting AI-guessed coordinates.
- */
 function formatQuestionsWithComputedRegions(
   rawQuestions: RawMappedQuestion[],
   totalPages: number,
@@ -585,7 +605,6 @@ function formatQuestionsWithComputedRegions(
         ? q.answerPages.map((p) => clamp(p, 1, Math.max(totalPages, 1)))
         : [answerPage];
 
-    // Compute region from the page text — accurate spatial position
     let region: { x: number; y: number; width: number; height: number; page: number };
     if (pageTexts.length > 0 && answered) {
       region = computeRegionFromPageText(
@@ -595,12 +614,13 @@ function formatQuestionsWithComputedRegions(
         q.extractedAnswerText || "",
         answerPage,
         maxMarks,
+        slotsUsedPerPage,
       );
     } else {
-      // Missing answer or no page texts — use slot-based fallback
       const slot = slotsUsedPerPage.get(answerPage) ?? 0;
       slotsUsedPerPage.set(answerPage, slot + 1);
-      region = { x: 5, y: 5 + slot * 22, width: 88, height: 18, page: answerPage };
+      const wrapped = slot % MAX_SLOTS_PER_PAGE;
+      region = { x: 5, y: 5 + wrapped * SLOT_HEIGHT, width: 88, height: 18, page: answerPage };
     }
 
     return {
@@ -623,23 +643,22 @@ function formatQuestionsWithComputedRegions(
   });
 }
 
-/**
- * When the AI mapping step fails entirely, synthesise sensible defaults
- * so at least the question list is populated with correct question data.
- */
 function buildDefaultMappedQuestions(
   rawQuestions: RawQuestion[],
   totalPages: number,
 ): Question[] {
+  const slotsUsedPerPage = new Map<number, number>();
+
   return rawQuestions.map((q, idx) => {
     const maxMarks = q.maxMarks ?? 2;
     const targetPage = Math.min(
       totalPages,
       Math.max(1, Math.ceil(((idx + 1) / rawQuestions.length) * totalPages)),
     );
-    // Spread questions evenly down the page, 4 slots per page
-    const slotOnPage = idx % 4;
-    const yPos = 5 + slotOnPage * 22;
+    const slot = slotsUsedPerPage.get(targetPage) ?? 0;
+    slotsUsedPerPage.set(targetPage, slot + 1);
+    const wrapped = slot % MAX_SLOTS_PER_PAGE;
+    const yPos = 5 + wrapped * SLOT_HEIGHT;
 
     return {
       id: q.id || `q${idx + 1}`,
@@ -662,13 +681,7 @@ function buildDefaultMappedQuestions(
   });
 }
 
-/**
- * Normalise raw AI output into typed Question objects.
- * Fills in safe defaults for every field so the UI never breaks.
- */
 function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number): Question[] {
-  // Track how many questions have already been assigned to each page
-  // so fallback regions don't stack on the same y position
   const slotsUsedPerPage = new Map<number, number>();
 
   return rawQuestions.map((q, idx) => {
@@ -684,7 +697,6 @@ function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number):
     const answered = q.answered ?? status !== "missing";
     const answerPage = clamp(q.answerPage ?? 1, 1, totalPages);
 
-    // Validate region — ensure all values are plausible percentages
     let region = q.region;
     if (
       !region ||
@@ -693,25 +705,26 @@ function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number):
       typeof region.width !== "number" ||
       typeof region.height !== "number"
     ) {
-      // Assign slots per page sequentially, not globally, so sub-parts on the
-      // same page get consecutive y positions rather than repeating every 4
+      // No usable AI-provided region — fall back to content-length sizing
+      // using the transcribed text, rather than a fixed generic box.
       const slot = slotsUsedPerPage.get(answerPage) ?? 0;
       slotsUsedPerPage.set(answerPage, slot + 1);
+      const wrapped = slot % MAX_SLOTS_PER_PAGE;
+      const height = estimateHeightFromLength(q.extractedAnswerText || "", maxMarks);
+      const width = estimateWidthFromLength(q.extractedAnswerText || "");
       region = {
         x: 5,
-        y: 5 + slot * 22,
-        width: 88,
-        height: 20,
+        y: 5 + wrapped * SLOT_HEIGHT,
+        width,
+        height,
         page: answerPage,
       };
     } else {
-      // Clamp to valid % range and ensure region.page is set correctly
       region = {
         x: clamp(region.x, 0, 95),
         y: clamp(region.y, 0, 90),
         width: clamp(region.width, 5, 95),
         height: clamp(region.height, 5, 90),
-        // region.page must be the page the answer is on, not a global index
         page: clamp(region.page ?? answerPage, 1, totalPages),
       };
     }
@@ -739,8 +752,4 @@ function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number):
       extractedAnswerText: q.extractedAnswerText || "",
     };
   });
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
