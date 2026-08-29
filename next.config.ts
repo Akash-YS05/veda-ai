@@ -1,14 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  // typescript: {
-  //   // !! WARNING: This allows production builds to successfully complete even if
-  //   // there are TypeScript errors. We recommend removing this during development.
-  //   ignoreBuildErrors: true,
-  // },
+  turbopack: {},
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.alias.canvas = false;
