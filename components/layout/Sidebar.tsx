@@ -54,7 +54,7 @@ function CompactSidebar() {
 
 function ExpandedSidebar() {
   return (
-    <aside className="w-[240px] min-w-[240px] py-[18px] px-[17px] flex flex-col items-stretch rounded-[12px] bg-white/96 shadow-[0_9px_18px_rgba(35,35,35,0.18)]">
+    <aside className="hidden lg:flex w-[240px] min-w-[240px] py-[18px] px-[17px] flex flex-col items-stretch rounded-[12px] bg-white/96 shadow-[0_9px_18px_rgba(35,35,35,0.18)]">
       {/* Brand row */}
       <div className="flex items-center gap-[7px] text-[#282828] justify-between">
         <div className="flex items-center gap-4">

@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
+import {Bricolage_Grotesque} from "next/font/google";
 import "./globals.css";
+
+const bricolage_grotesque = Bricolage_Grotesque({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
+})
 
 export const metadata: Metadata = {
   title: "Veda | Answer Mapper",

@@ -68,46 +68,46 @@ function UploadState({ files, ready, onFileChange, onFileRemove, onStartMapping 
     <>
       {/* heading */}
       <div className="text-center">
-        <h1 className="m-0 text-[26px] leading-[1.15] tracking-[-1.6px] font-[750]">
+        <h1 className="m-0 text-[26px] leading-[1.55] tracking-[-1.6px] font-[750]">
           Upload{" "}
           <em className="not-italic text-[#ff5623] bg-[rgba(255,147,80,0.15)] px-[7px] py-[4px] pb-[5px] rounded-[7px]">
             Question Paper &amp; Answer Sheets
           </em>
         </h1>
-        <p className="mt-[9px] text-[14px] tracking-[-0.6px] text-[#383838]">
+        <p className="hidden lg:block mt-[9px] text-[14px] tracking-[-0.6px] text-[#383838]">
           Upload both files to get started
         </p>
       </div>
 
       {/* upload-art */}
-      <div className="w-[98px] h-[98px] mx-auto mt-[15px] mb-[10px] relative grid place-items-center">
-        <span className="absolute w-[98px] h-[98px] rounded-full bg-[rgba(255,86,35,0.1)] backdrop-blur-[4px]" />
-        <span className="absolute w-[77px] h-[77px] rounded-full bg-[rgba(255,86,35,0.25)]" />
-        <span className="relative w-[56px] h-[56px] grid place-items-center rounded-full bg-gradient-to-b from-[#fe9c5d] to-[#f65d24] text-white shadow-[0_7px_21px_rgba(237,94,31,0.28)]">
+      <div className="w-[98px] h-[98px] mx-auto mt-[25px] mb-[20px] relative grid place-items-center">
+        {/* <span className="absolute w-[98px] h-[98px] rounded-full bg-[rgba(255,86,35,0.1)] backdrop-blur-[4px]" />
+        <span className="absolute w-[77px] h-[77px] rounded-full bg-[rgba(255,86,35,0.25)]" /> */}
+        <span className="relative w-[117px] h-[117px] grid place-items-center rounded-full  text-white ]">
           <span className="absolute inset-[10px] rounded-full bg-white" />
           <img
             alt="Upload"
-            className="relative z-10 w-[77px] h-[77px] object-contain"
+            className="relative z-10 w-[117px] h-[117px] object-contain"
             src="/assets/upload-illustration.svg"
           />
         </span>
       </div>
 
       {/* file-grid */}
-      <div className="w-full p-[9px] grid grid-cols-1 md:grid-cols-2 gap-[11px] mt-1 rounded-[17px] bg-[rgba(255,255,255,0.62)] shadow-[0_9px_18px_rgba(100,100,100,0.05),inset_0_1px_rgba(255,255,255,0.85)]">
-  <FilePicker
-    file={files.question}
-    onChange={onFileChange}
-    onRemove={onFileRemove}
-    type="question"
-  />
-  <FilePicker
-    file={files.answer}
-    onChange={onFileChange}
-    onRemove={onFileRemove}
-    type="answer"
-  />
-</div>
+      <div className="w-full p-[9px] grid grid-cols-1 md:grid-cols-2 gap-[11px] mt-1 rounded-[17px] bg-[rgba(255,255,255,0.62)] shadow-[0_9px_18px_rgba(100,100,100,0.20),inset_0_1px_rgba(255,255,255,0.85)]">
+        <FilePicker
+          file={files.question}
+          onChange={onFileChange}
+          onRemove={onFileRemove}
+          type="question"
+        />
+        <FilePicker
+          file={files.answer}
+          onChange={onFileChange}
+          onRemove={onFileRemove}
+          type="answer"
+        />
+      </div>
 
       {/* CTA button */}
       <button

@@ -26,7 +26,7 @@ export function FilePicker({ type, file, onChange, onRemove }: FilePickerProps) 
 
   return (
     <label 
-      className={`relative min-h-[181px] md:min-h-[129px] md:landing:min-h-[127px] p-[25px_16px] flex flex-col items-center justify-center gap-[9px] md:gap-[8px] border-[1.5px] md:border-[2px] border-dashed rounded-[10px] md:rounded-[13px] text-center transition-[0.2s_ease] ${
+      className={`relative min-h-[151px] md:min-h-[129px] md:landing:min-h-[127px] p-[25px_16px] flex flex-col items-center justify-center gap-[9px] md:gap-[8px] border-[2px] border-dashed rounded-[13px] text-center transition-[0.2s_ease] ${
         file 
           ? 'border-orange bg-[#fffaf7] md:border-[#cbcbcb] md:bg-white' 
           : 'border-[#d1d1d1] bg-[rgba(255,255,255,0.4)] md:bg-[rgba(255,255,255,0.94)] hover:border-orange hover:bg-[#fffaf7] md:hover:border-[#cbcbcb] md:hover:bg-white'
