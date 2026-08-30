@@ -28,7 +28,7 @@ export default function Home() {
     [questions, selectedId],
   );
 
-  const isLanding = phase !== "mapped";
+  const isLanding = phase !== "mapped" && phase !== "processing";
 
   function handleFileChange(slot: FileSlot, file: File) {
     setFiles((current) => ({ ...current, [slot]: file }));
