@@ -1,5 +1,6 @@
-import type { Question, QuestionStatus } from "@/lib/types";
+import type { Question } from "@/lib/types";
 import { ArrowDown } from "../ui/ArrowDown";
+import { STATUS_STYLES } from "./StatusStyles";
 
 type QuestionCardProps = {
   question: Question;
@@ -9,8 +10,6 @@ type QuestionCardProps = {
   onToggle: (id: string) => void;
 };
 
-import { STATUS_STYLES } from "./StatusStyles";
-
 export function QuestionCard({
   question,
   selected,
@@ -18,53 +17,138 @@ export function QuestionCard({
   onSelect,
   onToggle,
 }: QuestionCardProps) {
-  const isMissing = question.status === "missing" || question.answered === false;
+  const isMissing =
+    question.status === "missing" || question.answered === false;
 
   const part =
     question.subPart ||
-    (question.id === "q11a" ? "a." : question.id === "q11b" ? "b." : undefined);
+    (question.id === "q11a"
+      ? "a."
+      : question.id === "q11b"
+      ? "b."
+      : undefined);
 
-  const statusStyle = STATUS_STYLES[question.status] ?? STATUS_STYLES.missing;
+  const statusStyle =
+    STATUS_STYLES[question.status] ?? STATUS_STYLES.missing;
 
   return (
     <article
-      className={`p-[13px_12px] md:p-[14px] border-2 rounded-[18px] bg-[rgba(255,255,255,0.91)] md:bg-[rgba(255,255,255,0.92)] transition-[0.16s] hover:translate-y-[-1px] ${
-        selected ? 'border-[#ff7b40]' : 'border-transparent'
-      } ${isMissing ? 'opacity-70' : ''}`}
       onClick={() => onSelect(question.id)}
+      className={`p-3 md:p-[14px] border-2 rounded-[18px] bg-[rgba(255,255,255,0.92)] transition-[0.16s] hover:-translate-y-[1px] ${
+        selected ? "border-[#ff7b40]" : "border-transparent"
+      } ${isMissing ? "opacity-70" : ""}`}
     >
-      <div className="flex items-center md:items-start gap-[14px] md:gap-[14px]">
-        <span className={`flex-[0_0_auto] grid place-items-center w-[32px] h-[32px] md:w-[42px] md:h-[42px] text-white border-[3px] rounded-full shadow-[0_2px_5px_#aaa] text-[17px] md:text-[18px] font-bold ${
-          selected ? 'bg-orange border-[#ff9b76]' : 'bg-[#5b5b5b] border-[#eee]'
-        }`}>
+      {/* ---------- MOBILE ---------- */}
+<div className="flex flex-col gap-3 md:hidden">
+  {/* Top row */}
+  <div className="flex items-start">
+    <div className="flex items-center gap-2">
+      <span
+        className={`grid place-items-center w-8 h-8 text-white border-[3px] rounded-full shadow-[0_2px_5px_#aaa] text-[15px] font-bold ${
+          selected
+            ? "bg-orange border-[#ff9b76]"
+            : "bg-[#5b5b5b] border-[#eee]"
+        }`}
+      >
+        {question.number}
+      </span>
+
+      {part && (
+        <span className="px-2 py-1 rounded-full bg-[#f5f5f4] text-xs font-bold">
+          {part.endsWith(".") ? part : `${part}.`}
+        </span>
+      )}
+    </div>
+
+    <div className="ml-auto flex items-center gap-2">
+      <span
+        title={statusStyle.label}
+        className={`px-3 py-1 rounded-full text-[13px] font-bold whitespace-nowrap ${statusStyle.text} ${statusStyle.bg}`}
+      >
+        {isMissing ? statusStyle.label : question.marks}
+      </span>
+
+      <button
+        type="button"
+        aria-label={
+          expanded
+            ? "Collapse question feedback"
+            : "Expand question feedback"
+        }
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle(question.id);
+        }}
+        className={`grid place-items-center w-8 h-8 rounded-lg bg-[#f4f4f4] text-[#444] transition-transform ${
+          expanded ? "rotate-180" : ""
+        }`}
+      >
+        <ArrowDown />
+      </button>
+    </div>
+  </div>
+
+  {/* Question text */}
+  <p className="m-0 text-[14px] leading-[1.45] tracking-[-0.3px] text-[#3f3f3f]">
+    {question.body}
+  </p>
+</div>
+
+      {/* ---------- DESKTOP ---------- */}
+      <div className="hidden md:flex items-start gap-[14px]">
+        <span
+          className={`grid place-items-center w-[42px] h-[42px] text-white border-[3px] rounded-full shadow-[0_2px_5px_#aaa] text-[18px] font-bold ${
+            selected
+              ? "bg-orange border-[#ff9b76]"
+              : "bg-[#5b5b5b] border-[#eee]"
+          }`}
+        >
           {question.number}
         </span>
-        {part && <span className="flex-[0_0_auto] p-[6px_9px] rounded-full bg-[#f5f5f4] font-bold">{part.endsWith(".") ? part : `${part}.`}</span>}
-        <p className="flex-1 m-0 text-[#3f3f3f] text-[16px] md:text-[14px] leading-[1.42] md:leading-[1.45] tracking-[-0.45px]">{question.body}</p>
+
+        {part && (
+          <span className="px-[9px] py-[6px] rounded-full bg-[#f5f5f4] font-bold">
+            {part.endsWith(".") ? part : `${part}.`}
+          </span>
+        )}
+
+        <p className="flex-1 m-0 text-[14px] leading-[1.45] tracking-[-0.45px] text-[#3f3f3f]">
+          {question.body}
+        </p>
+
         <span
-          className={`flex-[0_0_auto] p-[7px_11px] md:p-[6px_10px] rounded-[18px] text-[16px] md:text-[13px] font-bold whitespace-nowrap ${statusStyle.text} ${statusStyle.bg}`}
           title={statusStyle.label}
+          className={`px-[10px] py-[6px] rounded-[18px] text-[13px] font-bold whitespace-nowrap ${statusStyle.text} ${statusStyle.bg}`}
         >
           {isMissing ? statusStyle.label : question.marks}
         </span>
+
         <button
-          aria-label={expanded ? "Collapse question feedback" : "Expand question feedback"}
-          className={`flex-[0_0_auto] grid place-items-center w-[30px] h-[30px] text-[#444] rounded-[8px] bg-[#f4f4f4] transition-transform ${
-            expanded || selected ? 'rotate-180' : ''
-          }`}
-          onClick={(event) => {
-            event.stopPropagation();
+          type="button"
+          aria-label={
+            expanded
+              ? "Collapse question feedback"
+              : "Expand question feedback"
+          }
+          onClick={(e) => {
+            e.stopPropagation();
             onToggle(question.id);
           }}
-          type="button"
+          className={`grid place-items-center w-[30px] h-[30px] rounded-[8px] bg-[#f4f4f4] text-[#444] transition-transform ${
+            expanded || selected ? "rotate-180" : ""
+          }`}
         >
           <ArrowDown />
         </button>
       </div>
+
+      {/* ---------- FEEDBACK ---------- */}
       {expanded && question.feedback && (
-        <div className="mt-[15px] ml-[49px] md:ml-[48px] p-[17px_24px] md:p-[16px] rounded-[15px] bg-[#f3f3f2]">
+        <div className="mt-4 ml-0 md:ml-12 p-4 rounded-[15px] bg-[#f3f3f2]">
           <strong className="text-[16px]">AI Feedback</strong>
-          <p className="mt-[10px] text-[14px] leading-[1.5]">{question.feedback}</p>
+          <p className="mt-[10px] text-[14px] leading-[1.5]">
+            {question.feedback}
+          </p>
         </div>
       )}
     </article>
