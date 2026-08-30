@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import {Bricolage_Grotesque} from "next/font/google";
+import { Analytics } from "@vercel/analytics/next"
 import "./globals.css";
 
 const bricolage_grotesque = Bricolage_Grotesque({
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className="m-0 max-w-full min-w-[320px] text-[#303030] font-[Bricolage_Grotesque,sans-serif] bg-[#ececeb]">
         {children}
+        <Analytics/>
       </body>
     </html>
   );
