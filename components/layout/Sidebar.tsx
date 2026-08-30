@@ -12,15 +12,22 @@ const navigation = [
   { icon: "library" as const, label: "My Library" },
 ];
 
-type SidebarProps = { expanded: boolean };
+type SidebarProps = {
+  expanded: boolean;
+  setExpanded: (expanded: boolean) => void;
+};
 
-export function Sidebar({ expanded }: SidebarProps) {
-  return expanded ? <ExpandedSidebar /> : <CompactSidebar />;
+export function Sidebar({ expanded, setExpanded }: SidebarProps) {
+  return expanded ? <ExpandedSidebar setExpanded={setExpanded}/> : <CompactSidebar setExpanded={setExpanded}/>;
 }
 
-function CompactSidebar() {
+function CompactSidebar({
+  setExpanded,
+}: {
+  setExpanded: (expanded: boolean) => void;
+}) {
   return (
-    <aside className="w-[65px] my-2 mx-2 py-3 px-[12px] flex flex-col items-center gap-10 rounded-[14px] bg-white shadow-[0_1px_40px_rgba(35,35,35,0.18)] z-10 max-[1050px]:hidden">
+    <aside className="w-[65px] py-3 px-[12px] flex flex-col items-center gap-10 rounded-[14px] bg-white shadow-[0_1px_40px_rgba(35,35,35,0.18)] z-10 max-[1050px]:hidden">
       {/* Brand */}
       <div className="w-[42px] h-[42px] rounded-[11px] text-white grid place-items-center bg-[#333] text-[27px] font-extrabold italic shadow-[0_3px_10px_#bbb]">
         <BrandLogo />
@@ -45,14 +52,24 @@ function CompactSidebar() {
 
       {/* Footer */}
       <div className="mt-auto grid gap-[19px] text-[#5e5e5e] text-center text-[23px]">
-        <img alt="Delhi Public School crest" height="60" src="/assets/school-crest.svg" width="40" />
-        <SettingsIcon />
+        <img alt="Delhi Public School crest" height="40" src="/assets/school-crest.svg" width="40" />
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="bg-transparent p-0 text-[#5e5e5e] hover:text-[#333]"
+        >
+          <SettingsIcon />
+        </button>
       </div>
     </aside>
   );
 }
 
-function ExpandedSidebar() {
+function ExpandedSidebar({
+  setExpanded,
+}: {
+  setExpanded: (expanded: boolean) => void;
+}) {
   return (
     <aside className="hidden lg:flex w-[240px] min-w-[240px] py-[18px] px-[17px] flex flex-col items-stretch rounded-[12px] bg-white/96 shadow-[0_9px_18px_rgba(35,35,35,0.18)]">
       {/* Brand row */}
@@ -64,7 +81,13 @@ function ExpandedSidebar() {
           <strong className="text-[21px] tracking-[-1.2px]">VedaAI</strong>
         </div>
         <div className="text-[#777]">
-          <ExpandIcon />
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="text-[#777]"
+          >
+            <ExpandIcon />
+          </button>
         </div>
       </div>
 

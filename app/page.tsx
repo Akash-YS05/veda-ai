@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MappingView } from "@/components/mapping/MappingView";
@@ -12,6 +12,7 @@ import type { FileSlot, Phase, Question } from "@/lib/types";
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("upload");
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [files, setFiles] = useState<Partial<Record<FileSlot, File>>>({});
   const [questions, setQuestions] = useState<Question[]>(demoQuestions);
   const [selectedId, setSelectedId] = useState("q2");
@@ -29,6 +30,11 @@ export default function Home() {
   );
 
   const isLanding = phase !== "mapped" && phase !== "processing";
+  useEffect(() => {
+    if (phase === "processing" || phase === "mapped") {
+      setSidebarExpanded(false);
+    }
+  }, [phase]);
 
   function handleFileChange(slot: FileSlot, file: File) {
     setFiles((current) => ({ ...current, [slot]: file }));
@@ -106,15 +112,18 @@ export default function Home() {
     ? // Landing: radial white→grey gradient, full height, compact gap, no scroll
       "min-h-dvh flex gap-2 p-[9px_8px] overflow-hidden bg-[radial-gradient(circle_at_50%_48%,#fff_0,#f7f7f5_43%,#d7d7d5_100%)]"
     : // Mapping: simple flex row, full height
-      "min-h-screen flex bg-[radial-gradient(80%_70%_at_60%_-20%,#fff_0,#f5f5f3_55%,#e8e8e5_100%)]";
+      "min-h-screen flex gap-2 p-2 bg-[radial-gradient(80%_70%_at_60%_-20%,#fff_0,#f5f5f3_55%,#e8e8e5_100%)]";
 
   const workspaceClass = isLanding
     ? "flex-1 min-w-0 p-0"
-    : "flex-1 min-w-0 h-screen p-2 overflow-hidden";
+    : "flex-1 min-w-0 p-0 h-[calc(100dvh-1rem)] p-2 overflow-hidden";
 
   return (
     <main className={shellClass}>
-      <Sidebar expanded={isLanding} />
+      <Sidebar
+        expanded={sidebarExpanded}
+        setExpanded={setSidebarExpanded}
+      />      
       <section className={workspaceClass}>
         <Header onBack={handleBack} isLanding={isLanding} />
         {phase === "mapped" ? (

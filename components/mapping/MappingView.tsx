@@ -107,7 +107,7 @@ export function MappingView({
 
   const AnswerPanel = () => (
     <section className="answer-panel h-full flex flex-col">
-      <header className="answer-toolbar">
+      <header className="answer-toolbar min-w-0">
         <h2 className="hidden lg:block">Answer Sheet</h2>
 
         <div className="">
@@ -127,7 +127,7 @@ export function MappingView({
             +
           </button>
 
-          <div className="flex items-center ml-14 md:ml-3 bg-[#474747] rounded-lg px-2 text-sm text-gray-200">
+          <div className="flex min-w-0 items-center ml-14 md:ml-3 bg-[#474747] rounded-lg px-2 text-sm text-gray-200">
             <button
               type="button"
               onClick={handlePrevPage}
@@ -165,7 +165,7 @@ export function MappingView({
   );
 
   return (
-    <div className="mapping-stage-wrapper h-full">
+    <div className="mapping-stage-wrapper h-full w-full min-w-0 overflow-x-hidden">
       {summary && <GradingSummaryBar summary={summary} />}
 
       {extractionError && (
@@ -176,7 +176,7 @@ export function MappingView({
       )}
 
       {/* ---------------- MOBILE ---------------- */}
-      <div className="lg:hidden flex h-[calc(100vh-64px)] flex-col">
+      <div className="lg:hidden flex h-[calc(100vh-64px)] w-full min-w-0 flex-col overflow-x-hidden">
         <div className="mx-3 mb-3 rounded-full bg-[#ECECEA] p-1 flex">
           <button
             type="button"
@@ -203,7 +203,7 @@ export function MappingView({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 px-2">
+        <div className="flex-1 min-h-0 min-w-0 p-0">
           {mobileTab === "questions" ? <QuestionsPanel /> : <AnswerPanel />}
         </div>
       </div>
