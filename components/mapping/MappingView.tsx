@@ -2,8 +2,10 @@
 
 import { useRef, useState } from "react";
 import type { Question } from "@/lib/types";
+import type { GradingSummary } from "@/lib/grading-summary";
 import { PaperPreview } from "./PaperPreview";
 import { QuestionCard } from "./QuestionCard";
+import { GradingSummaryBar } from "./GradingSummaryBar";
 import { ChevronLeft } from "../ui/ChevronLeft";
 import { ChevronRight } from "../ui/ChevronRight";
 
@@ -22,6 +24,7 @@ type MappingViewProps = {
   onToggleExpandAll: () => void;
   answerPageImages?: string[];
   extractionError?: string | null;
+  summary?: GradingSummary;
 };
 
 export function MappingView({
@@ -39,6 +42,7 @@ export function MappingView({
   onToggleExpandAll,
   answerPageImages,
   extractionError,
+  summary,
 }: MappingViewProps) {
   const containerRef = useRef<HTMLElement>(null);
 
@@ -162,6 +166,8 @@ export function MappingView({
 
   return (
     <div className="mapping-stage-wrapper h-full">
+      {summary && <GradingSummaryBar summary={summary} />}
+
       {extractionError && (
         <div className="flex items-start gap-3 bg-amber-950/60 border border-amber-600/50 text-amber-200 text-sm px-4 py-3 rounded-lg mx-3 mb-3">
           <span>⚠</span>

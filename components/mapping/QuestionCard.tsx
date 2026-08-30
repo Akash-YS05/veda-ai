@@ -1,4 +1,4 @@
-import type { Question } from "@/lib/types";
+import type { Question, QuestionStatus } from "@/lib/types";
 import { ArrowDown } from "../ui/ArrowDown";
 
 type QuestionCardProps = {
@@ -8,6 +8,8 @@ type QuestionCardProps = {
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
 };
+
+import { STATUS_STYLES } from "./StatusStyles";
 
 export function QuestionCard({
   question,
@@ -22,11 +24,13 @@ export function QuestionCard({
     question.subPart ||
     (question.id === "q11a" ? "a." : question.id === "q11b" ? "b." : undefined);
 
+  const statusStyle = STATUS_STYLES[question.status] ?? STATUS_STYLES.missing;
+
   return (
-    <article 
+    <article
       className={`p-[13px_12px] md:p-[14px] border-2 rounded-[18px] bg-[rgba(255,255,255,0.91)] md:bg-[rgba(255,255,255,0.92)] transition-[0.16s] hover:translate-y-[-1px] ${
         selected ? 'border-[#ff7b40]' : 'border-transparent'
-      }`}
+      } ${isMissing ? 'opacity-70' : ''}`}
       onClick={() => onSelect(question.id)}
     >
       <div className="flex items-center md:items-start gap-[14px] md:gap-[14px]">
@@ -36,13 +40,12 @@ export function QuestionCard({
           {question.number}
         </span>
         {part && <span className="flex-[0_0_auto] p-[6px_9px] rounded-full bg-[#f5f5f4] font-bold">{part.endsWith(".") ? part : `${part}.`}</span>}
-        <p className="flex-1 m-0 text-[#3f3f3f] text-[16px] md:text-[15px] md:text-[14px] leading-[1.42] md:leading-[1.45] tracking-[-0.45px]">{question.body}</p>
-        <span className={`flex-[0_0_auto] p-[7px_11px] md:p-[6px_10px] rounded-[18px] text-[16px] md:text-[14px] md:text-[13px] font-bold whitespace-nowrap ${
-          question.status === 'good' ? 'text-[#23b619] bg-[#ecf8e9]' :
-          question.status === 'partial' ? 'text-[#ed7415] bg-[#fff4e5]' :
-          'text-[#f04421] bg-[#ffe9e4]'
-        }`}>
-          {question.marks}
+        <p className="flex-1 m-0 text-[#3f3f3f] text-[16px] md:text-[14px] leading-[1.42] md:leading-[1.45] tracking-[-0.45px]">{question.body}</p>
+        <span
+          className={`flex-[0_0_auto] p-[7px_11px] md:p-[6px_10px] rounded-[18px] text-[16px] md:text-[13px] font-bold whitespace-nowrap ${statusStyle.text} ${statusStyle.bg}`}
+          title={statusStyle.label}
+        >
+          {isMissing ? statusStyle.label : question.marks}
         </span>
         <button
           aria-label={expanded ? "Collapse question feedback" : "Expand question feedback"}
@@ -59,9 +62,9 @@ export function QuestionCard({
         </button>
       </div>
       {expanded && question.feedback && (
-        <div className="mt-[15px] ml-[49px] md:ml-[54px] md:ml-[48px] p-[17px_24px] md:p-[18px] md:p-[16px] rounded-[15px] bg-[#f3f3f2]">
+        <div className="mt-[15px] ml-[49px] md:ml-[48px] p-[17px_24px] md:p-[16px] rounded-[15px] bg-[#f3f3f2]">
           <strong className="text-[16px]">AI Feedback</strong>
-          <p className="mt-[10px] text-[14px] leading-[1.5]">{ question.feedback}</p>
+          <p className="mt-[10px] text-[14px] leading-[1.5]">{question.feedback}</p>
         </div>
       )}
     </article>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Question } from "@/lib/types";
+import type { Question, QuestionStatus } from "@/lib/types";
 
 type PaperPreviewProps = {
   selectedQuestion: Question;
@@ -11,6 +11,32 @@ type PaperPreviewProps = {
   answerPageImages?: string[];
   onPageChange?: (page: number) => void;
 };
+
+/** Maps a grading status to a CSS class so correct/partial/incorrect/missing
+ * all look visually distinct. Add matching styles in your CSS:
+ *   .status-good      { border-color: #16a34a; background: rgba(22,163,74,0.12); }
+ *   .status-partial    { border-color: #d97706; background: rgba(217,119,6,0.12); }
+ *   .status-incorrect  { border-color: #dc2626; background: rgba(220,38,38,0.10); }
+ *   .status-missing    { border-color: #6b7280; background: rgba(107,114,128,0.10); border-style: dashed; }
+ */
+function statusClass(status: QuestionStatus): string {
+  switch (status) {
+    case "good":
+      return "status-good";
+    case "partial":
+      return "status-partial";
+    case "incorrect":
+      return "status-incorrect";
+    case "missing":
+    default:
+      return "status-missing";
+  }
+}
+
+function scoreLabel(question: Question): string | null {
+  if (typeof question.score !== "number" || typeof question.maxMarks !== "number") return null;
+  return `${question.score}/${question.maxMarks}`;
+}
 
 export function PaperPreview({
   selectedQuestion,
@@ -22,13 +48,9 @@ export function PaperPreview({
   const isQuestionAnswered =
     selectedQuestion.answered !== false && selectedQuestion.status !== "missing";
 
-  // A question should highlight on a page if:
-  //  - it's the primary answer page, OR
-  //  - currentPage is in answerPages (multi-page answer)
   const answerPages = selectedQuestion.answerPages ?? [selectedQuestion.answerPage ?? 1];
   const isSelectedOnCurrentPage = answerPages.includes(currentPage);
 
-  // Build the display label: "11 (a)", "11 (b)", "3", etc.
   const subPart = selectedQuestion.subPart
     ? selectedQuestion.subPart.replace(/\.$/, "")
     : "";
@@ -108,11 +130,6 @@ function RealImageWithHighlight({
   const [imgSize, setImgSize] = useState<{ width: number; height: number } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // Measure the image's layout size (before CSS transforms).
-  // IMPORTANT: getBoundingClientRect() is affected by CSS transforms (zoom scale
-  // on the parent .paper div), so it returns scaled-down dimensions that would
-  // make highlights misaligned. offsetWidth/offsetHeight always return the
-  // pre-transform layout size, which is what we need for % → px conversion.
   const measureImage = () => {
     const el = imgRef.current;
     if (!el) return;
@@ -121,16 +138,12 @@ function RealImageWithHighlight({
     }
   };
 
-  // Re-measure on image change, zoom change, or first mount.
-  // zoom changes alter the parent transform which doesn't affect offsetWidth/offsetHeight,
-  // but we still re-measure to stay in sync with any reflowing.
   useEffect(() => {
     const id = requestAnimationFrame(measureImage);
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageUrl, zoom]);
 
-  // Also re-measure on window resize so zoom/reflow doesn't desync the overlay
   useEffect(() => {
     const handler = () => {
       requestAnimationFrame(measureImage);
@@ -140,16 +153,12 @@ function RealImageWithHighlight({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Use the region as-is. Only suppress it when region.page explicitly points to
-  // a different page than the one currently displayed. When region.page is not
-  // set (undefined / 0), treat it as belonging to answerPage (the primary page).
   const region = question.region;
   const answerPages = question.answerPages ?? [question.answerPage ?? 1];
   const regionBelongsToPage = region
     ? (region.page ?? question.answerPage ?? 1) === currentPage
     : answerPages.includes(currentPage);
 
-  // Continuation pages: next page in answerPages after currentPage
   const currentPageIdx = answerPages.indexOf(currentPage);
   const nextPage =
     currentPageIdx >= 0 && currentPageIdx < answerPages.length - 1
@@ -157,7 +166,6 @@ function RealImageWithHighlight({
       : undefined;
   const isMultiPage = answerPages.length > 1;
 
-  // Pixel-precise highlight style computed from measured image size + region %
   const highlightStyle =
     showHighlight && region && regionBelongsToPage && imgSize
       ? {
@@ -168,6 +176,8 @@ function RealImageWithHighlight({
           height: Math.round((region.height / 100) * imgSize.height),
         }
       : null;
+
+  const score = scoreLabel(question);
 
   return (
     <div style={{ position: "relative", display: "block", width: "100%" }}>
@@ -181,10 +191,14 @@ function RealImageWithHighlight({
 
       {showHighlight && highlightStyle && (
         <div
-          className={`real-image-highlight ${!isAnswered ? "empty" : ""}`}
+          className={`real-image-highlight ${statusClass(question.status)} ${!isAnswered ? "empty" : ""}`}
           style={highlightStyle}
+          title={question.feedback || undefined}
         >
-          <span className="highlight-badge">{label}</span>
+          <span className="highlight-badge">
+            {label}
+            {score && <span className="highlight-score"> · {score}</span>}
+          </span>
 
           {isMultiPage && nextPage && onPageChange && (
             <button
@@ -224,11 +238,12 @@ function DemoHighlightedRegion({
 
   const isMultiPage = question.answerPages && question.answerPages.length > 1;
   const nextPage = question.answerPages?.[1];
+  const score = scoreLabel(question);
 
   if (!isAnswered) {
     return (
       <div
-        className="answer-region empty"
+        className={`answer-region empty ${statusClass(question.status)}`}
         style={{ top: topPos, left: leftPos, width: widthPos, minHeight: "140px", height: heightPos }}
       >
         <span>{label}</span>
@@ -242,12 +257,19 @@ function DemoHighlightedRegion({
 
   return (
     <div
-      className="answer-region"
+      className={`answer-region ${statusClass(question.status)}`}
       style={{ top: topPos, left: leftPos, width: widthPos, minHeight: "180px", height: heightPos }}
     >
-      <span>{label}</span>
+      <span>
+        {label}
+        {score && <span className="highlight-score"> · {score}</span>}
+      </span>
       <b>Q{label}.</b>
       <p>{question.extractedAnswerText || "Answer content identified from student's handwriting."}</p>
+
+      {question.feedback && (
+        <p className="text-xs mt-2 italic opacity-80">{question.feedback}</p>
+      )}
 
       {isMultiPage && nextPage && (
         <div className="mt-3 flex items-center gap-2">

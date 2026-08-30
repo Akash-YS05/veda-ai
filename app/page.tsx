@@ -7,6 +7,7 @@ import { MappingView } from "@/components/mapping/MappingView";
 import { UploadView } from "@/components/upload/UploadView";
 import { demoQuestions } from "@/lib/demo-data";
 import { processQuestionAndAnswerFiles } from "@/lib/groq";
+import type { GradingSummary } from "@/lib/grading-summary";
 import type { FileSlot, Phase, Question } from "@/lib/types";
 
 export default function Home() {
@@ -20,6 +21,7 @@ export default function Home() {
   const [totalPages, setTotalPages] = useState(4);
   const [answerPageImages, setAnswerPageImages] = useState<string[]>([]);
   const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<GradingSummary | undefined>(undefined);
 
   const selectedQuestion = useMemo(
     () => questions.find((q) => q.id === selectedId) ?? questions[0] ?? demoQuestions[0],
@@ -52,6 +54,7 @@ export default function Home() {
       setQuestions(result.questions);
       setTotalPages(result.totalPages || 4);
       setAnswerPageImages(result.answerPageImages || []);
+      setSummary(result.summary);
       if (result.extractionError) setExtractionError(result.extractionError);
       const defaultQ = result.questions[1] || result.questions[0];
       if (defaultQ) {
@@ -63,6 +66,7 @@ export default function Home() {
       setQuestions(demoQuestions);
       setTotalPages(4);
       setAnswerPageImages([]);
+      setSummary(undefined);
       setExtractionError(
         `Extraction failed: ${(err as Error).message || "Unknown error"}. Showing demo data.`,
       );
@@ -127,6 +131,7 @@ export default function Home() {
             selectedId={selectedId}
             selectedQuestion={selectedQuestion}
             setZoom={setZoom}
+            summary={summary}
             totalPages={totalPages}
             zoom={zoom}
           />
