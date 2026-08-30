@@ -1,6 +1,8 @@
+import { GradingSummary } from "./grading-summary";
+
 export type FileSlot = "question" | "answer";
 export type Phase = "upload" | "processing" | "mapped";
-export type QuestionStatus = "good" | "partial" | "missing";
+export type QuestionStatus = "good" | "partial" | "incorrect" | "missing";
 
 export interface AnswerRegion {
   x: number; // percentage 0-100
@@ -41,4 +43,5 @@ export interface ExtractionResult {
   questionPageImages?: string[];
   /** Human-readable message when extraction partially or fully failed */
   extractionError?: string;
+  summary?: GradingSummary;
 }

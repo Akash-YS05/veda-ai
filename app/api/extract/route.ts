@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import Groq from "groq-sdk";
 import { parseAndMapDocumentsLocally } from "@/lib/local-extractor";
+import { buildGradingSummary } from "@/lib/grading-summary";
 import type { Question, QuestionStatus } from "@/lib/types";
 
 interface UploadFileMeta {
   name?: string;
   totalPages?: number;
   pageImages?: string[];
-  /** Same images with a printed % grid — used for vision model calls only. */
   annotatedPageImages?: string[];
   pageTexts?: string[];
   fullText?: string;
@@ -56,16 +56,20 @@ export async function POST(req: Request) {
     if (GROQ_API_KEY && GROQ_API_KEY.length > 10 && !GROQ_API_KEY.startsWith("your-")) {
       const result = await tryGroqExtraction(questionFile, answerFile, GROQ_API_KEY);
       if (result && result.questions.length > 0) {
+        const summary = buildGradingSummary(result.questions, /* contentGraded */ true);
         return NextResponse.json({
           success: true,
           questions: result.questions,
           totalPages: result.totalPages,
+          summary,
           isDemo: false,
         });
       }
       console.warn("Groq extraction returned no questions, falling back to local parser");
     }
 
+    // Local text-based fallback — presence-only, cannot judge correctness
+    // without an AI/rubric, so the summary is explicitly labeled as such.
     const localResult = parseAndMapDocumentsLocally({
       questionTexts: questionFile?.pageTexts || [],
       answerTexts: answerFile?.pageTexts || [],
@@ -76,10 +80,12 @@ export async function POST(req: Request) {
     });
 
     if (localResult.questions.length > 0) {
+      const summary = buildGradingSummary(localResult.questions, /* contentGraded */ false);
       return NextResponse.json({
         success: true,
         questions: localResult.questions,
         totalPages: localResult.totalPages,
+        summary,
         isDemo: false,
       });
     }
@@ -281,7 +287,7 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 helpers: map + grade answers
+// Step 2+3 helpers: map answers AND grade them for correctness
 // ---------------------------------------------------------------------------
 
 const MAX_SLOTS_PER_PAGE = 4;
@@ -306,13 +312,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-/**
- * Size HEIGHT from the actual length of the transcribed answer text
- * (Groq already gives us this in `extractedAnswerText`), instead of a
- * fixed lookup keyed only on the question's mark value. `maxMarks` is
- * used only as a floor so high-mark questions never collapse to a
- * sliver even if the transcription came back short.
- */
 function estimateHeightFromLength(answerText: string, maxMarks: number): number {
   const len = (answerText || "").trim().length;
   const CHARS_PER_PCT = 45;
@@ -321,12 +320,36 @@ function estimateHeightFromLength(answerText: string, maxMarks: number): number 
   return clamp(Math.max(lengthBasedHeight, minFloor), 6, 65);
 }
 
-/** Size WIDTH from answer length — short answers get a narrower box. */
 function estimateWidthFromLength(answerText: string): number {
   const len = (answerText || "").trim().length;
   if (len < 20) return 40;
   if (len < 60) return 65;
   return 88;
+}
+
+/**
+ * Default score used ONLY when the AI omits a numeric "score" field.
+ * Crucially, "partial" and "incorrect" no longer silently default to
+ * full marks — that was the core grading bug.
+ */
+function defaultScoreForStatus(status: QuestionStatus, maxMarks: number): number {
+  switch (status) {
+    case "good":
+      return maxMarks;
+    case "partial":
+      return Math.round(maxMarks / 2);
+    case "incorrect":
+    case "missing":
+    default:
+      return 0;
+  }
+}
+
+function resolveStatus(raw: unknown, answered: boolean | undefined): QuestionStatus {
+  if (raw === "good" || raw === "partial" || raw === "incorrect" || raw === "missing") {
+    return raw;
+  }
+  return answered === false ? "missing" : "good";
 }
 
 function computeRegionFromPageText(
@@ -421,32 +444,37 @@ async function mapAnswersFromText(
   const questionList = questions
     .map((q) => {
       const label = q.subPart ? `${q.number} (${q.subPart})` : q.number;
-      return `- Q${label}: ${q.body}`;
+      return `- Q${label} [${q.maxMarks ?? 2} marks]: ${q.body}`;
     })
     .join("\n");
 
-  const prompt = `You are an expert exam grader.
+  const prompt = `You are an expert exam grader with strong subject-matter knowledge of whatever topic this exam covers.
 
-Below are the questions from the exam paper. Map each to the student's answer sheet text, then grade.
-
-QUESTIONS:
+QUESTIONS AND THEIR MARK VALUES:
 ${questionList}
 
 STUDENT ANSWER SHEET TEXT (${totalPages} page(s)):
 ${answerText.substring(0, 12000)}
 
-For each question:
-1. Find the student's answer (they may answer out of order, or skip questions).
-2. Grade: status "good" (full/near-full), "partial", or "missing" (unanswered).
-3. Set answerPage to the 1-indexed page number where the answer appears.
-   If the answer spans multiple pages, set answerPages to e.g. [2,3].
-4. Copy the student's answer text verbatim into extractedAnswerText, INCLUDING ITS FULL LENGTH
-   (do not truncate short answers or pad short ones) — this is used to size the highlight, so
-   accuracy of length matters as much as content.
-5. Write constructive feedback.
+For EACH question, do the following:
+1. LOCATE the student's answer in the sheet (they may answer out of order, or skip questions).
+2. EVALUATE CORRECTNESS using your own subject knowledge of what the question is actually asking — do not just check that something was written. Compare the substance of the answer against what a correct answer should contain.
+3. Assign a "status":
+   - "good": the answer is correct and reasonably complete for the marks available
+   - "partial": the answer is on the right track but has errors, is incomplete, or is missing key points
+   - "incorrect": the student wrote something, but it is factually wrong or irrelevant to the question
+   - "missing": no answer was found for this question at all
+4. Assign a numeric "score" out of "maxMarks" reflecting the quality of the answer:
+   - "good" → score should equal or nearly equal maxMarks
+   - "partial" → score MUST be strictly greater than 0 and strictly less than maxMarks (scale it to how much of the expected answer is actually right)
+   - "incorrect" or "missing" → score = 0
+   NEVER omit "score". NEVER give full marks for "partial" or "incorrect".
+5. Set answerPage (1-indexed) and answerPages if it spans multiple pages.
+6. Copy the student's answer verbatim into "extractedAnswerText" at its FULL actual length (don't pad short answers, don't truncate beyond 300 chars).
+7. Write "feedback": 1-3 sentences that justify the score — state specifically what was correct, what was wrong or missing, and how to improve.
 
 You MUST respond with ONLY valid JSON and absolutely nothing else — no markdown, no code fences, no explanation:
-{"questions":[{"id":"q1","number":"1","subPart":null,"body":"Question text","marks":"2 / 2","score":2,"maxMarks":2,"status":"good","answered":true,"page":1,"answerPage":1,"answerPages":[1],"feedback":"...","extractedAnswerText":"Student answer verbatim"}]}`;
+{"questions":[{"id":"q1","number":"1","subPart":null,"body":"Question text","marks":"1.5 / 2","score":1.5,"maxMarks":2,"status":"partial","answered":true,"page":1,"answerPage":1,"answerPages":[1],"feedback":"Correctly identified X but missed explaining Y, which cost half a mark.","extractedAnswerText":"Student answer verbatim"}]}`;
 
   const models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
   for (const model of models) {
@@ -461,7 +489,7 @@ You MUST respond with ONLY valid JSON and absolutely nothing else — no markdow
       const parsed = safeParseJson(content);
       const rawList = parsed?.questions;
       if (Array.isArray(rawList) && rawList.length > 0) {
-        console.log(`Step2/text: mapped ${rawList.length} questions via ${model}`);
+        console.log(`Step2/text: graded ${rawList.length} questions via ${model}`);
         return formatQuestionsWithComputedRegions(
           rawList as RawMappedQuestion[],
           totalPages,
@@ -490,36 +518,45 @@ async function mapAnswersFromImages(
   const questionList = questions
     .map((q) => {
       const label = q.subPart ? `${q.number} (${q.subPart})` : q.number;
-      return `- Q${label}: ${q.body}`;
+      return `- Q${label} [${q.maxMarks ?? 2} marks]: ${q.body}`;
     })
     .join("\n");
 
-  const promptText = `You are an expert exam grader reading a student's handwritten answer sheet.
+  const promptText = `You are an expert exam grader with strong subject-matter knowledge, reading a student's handwritten answer sheet.
 
-The exam has these questions:
+QUESTIONS AND THEIR MARK VALUES:
 ${questionList}
 
-Each image has a printed reference grid: thin red horizontal lines every 10% of the page height, labeled "0%" at the very top down to "100%" at the very bottom, printed on the left edge of each line.
+Each image has a printed reference grid: thin red horizontal lines every 10% of the page height, labeled "0%" at the top to "100%" at the bottom, on the left edge of each line.
 
-For each question:
-1. Find the student's handwritten answer. Students may answer out of order or skip questions.
-2. Grade: status "good", "partial", or "missing".
-3. Determine the bounding box of the answer using the printed grid labels as your reference — do NOT estimate percentages freehand:
-   - Find the grid line(s) nearest the TOP and BOTTOM of the answer's actual handwriting/text, read their printed percentage labels directly, and use those to set "y" (top) and derive "height" (bottom % minus y).
-   - CRITICAL: the box size MUST vary with how much the student wrote. A one-line or single-word answer should get a short box (roughly height 6-15). A multi-line paragraph should get a taller box that spans all of its lines (height can be 20, 40, 60+ if the answer is long). Do NOT give every answer the same height — measure each one independently off the grid.
-   - x and width should span most of the usable page width (roughly x=5, width=88) for normal paragraph answers, but use a narrower width (e.g. width=30-50) for a short one-line or single-word answer.
-4. Record which page(s) the answer is on (answerPage, answerPages) — this is the image order (1-indexed), not the printed grid.
-5. Write brief, constructive feedback.
-6. Transcribe the answer text (extractedAnswerText, up to 300 chars) — its actual length should be consistent with the box size you chose.
+For EACH question:
+1. LOCATE the student's handwritten answer. Students may answer out of order or skip questions.
+2. EVALUATE CORRECTNESS using your own subject knowledge of what the question is asking — do not just check that something was written.
+3. Assign "status":
+   - "good": correct and reasonably complete for the marks available
+   - "partial": on the right track but has errors, gaps, or missing key points
+   - "incorrect": wrote something, but it's wrong or irrelevant
+   - "missing": no answer found
+4. Assign a numeric "score" out of "maxMarks":
+   - "good" → equal or near-equal to maxMarks
+   - "partial" → strictly between 0 and maxMarks, scaled to how much is actually right
+   - "incorrect" or "missing" → 0
+   NEVER omit "score". NEVER give full marks for "partial" or "incorrect".
+5. Determine the bounding box using the printed grid labels — do NOT estimate percentages freehand:
+   - Read the grid line percentages nearest the TOP and BOTTOM of the answer's actual handwriting to set "y" and "height".
+   - The box size MUST vary with how much was written: a one-line/one-word answer gets height ~6-15; a multi-line answer gets a taller box (20-65) spanning all its lines. Never use the same height for every answer.
+   - x/width should span most of the page (x=5, width=88) for normal answers, narrower (width=30-50) for a short one-line/word answer.
+6. Record answerPage / answerPages (1-indexed, matches image order).
+7. Write "feedback": 1-3 sentences justifying the score.
+8. Transcribe "extractedAnswerText" (up to 300 chars) at its true length.
 
 You MUST respond with ONLY valid JSON and absolutely nothing else — no markdown, no code fences, no explanation:
-{"questions":[{"id":"q1","number":"1","subPart":null,"body":"...","marks":"2 / 2","score":2,"maxMarks":2,"status":"good","answered":true,"page":1,"answerPage":1,"answerPages":[1],"feedback":"...","extractedAnswerText":"...","region":{"x":5,"y":8,"width":88,"height":20,"page":1}}]}
+{"questions":[{"id":"q1","number":"1","subPart":null,"body":"...","marks":"1.5 / 2","score":1.5,"maxMarks":2,"status":"partial","answered":true,"page":1,"answerPage":1,"answerPages":[1],"feedback":"...","extractedAnswerText":"...","region":{"x":5,"y":8,"width":88,"height":20,"page":1}}]}
 
 IMPORTANT for sub-parts (e.g. "11 (a)" and "11 (b)"):
-- Each sub-part gets its own separate region object, read off the grid independently
+- Each sub-part gets its own separate region, status, and score — graded independently
 - region.page must equal the answerPage for that specific sub-part
-- Sub-parts answered on the same sheet page must have different y values (one above the other) based on where they actually fall on the grid
-- Sub-parts answered on different sheet pages must have different answerPage and region.page`;
+- Sub-parts on the same sheet page must have different y values based on where they actually fall`;
 
   for (const model of visionModels) {
     try {
@@ -544,7 +581,7 @@ IMPORTANT for sub-parts (e.g. "11 (a)" and "11 (b)"):
       const parsed = safeParseJson(content);
       const rawList = parsed?.questions;
       if (Array.isArray(rawList) && rawList.length > 0) {
-        console.log(`Step2/vision: mapped ${rawList.length} questions via ${model}`);
+        console.log(`Step2/vision: graded ${rawList.length} questions via ${model}`);
         return formatQuestions(rawList as RawMappedQuestion[], totalPages);
       }
     } catch (err) {
@@ -588,15 +625,10 @@ function formatQuestionsWithComputedRegions(
   const slotsUsedPerPage = new Map<number, number>();
 
   return rawQuestions.map((q, idx) => {
-    const status: QuestionStatus =
-      q.status === "good" || q.status === "partial" || q.status === "missing"
-        ? q.status
-        : q.answered === false
-          ? "missing"
-          : "good";
-
+    const status = resolveStatus(q.status, q.answered);
     const maxMarks = q.maxMarks ?? 2;
-    const score = q.score ?? (status === "missing" ? 0 : maxMarks);
+    const score =
+      typeof q.score === "number" ? clamp(q.score, 0, maxMarks) : defaultScoreForStatus(status, maxMarks);
     const answered = q.answered ?? status !== "missing";
     const answerPage = clamp(q.answerPage ?? 1, 1, Math.max(totalPages, 1));
 
@@ -671,7 +703,7 @@ function buildDefaultMappedQuestions(
       status: "missing" as QuestionStatus,
       answered: false,
       feedback:
-        "Answer mapping could not be completed automatically. Please review the answer sheet manually.",
+        "Grading could not be completed automatically. Please review the answer sheet manually.",
       extractedAnswerText: "",
       page: q.page || 1,
       answerPage: targetPage,
@@ -685,15 +717,10 @@ function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number):
   const slotsUsedPerPage = new Map<number, number>();
 
   return rawQuestions.map((q, idx) => {
-    const status: QuestionStatus =
-      q.status === "good" || q.status === "partial" || q.status === "missing"
-        ? q.status
-        : q.answered === false
-          ? "missing"
-          : "good";
-
+    const status = resolveStatus(q.status, q.answered);
     const maxMarks = q.maxMarks ?? 2;
-    const score = q.score ?? (status === "missing" ? 0 : maxMarks);
+    const score =
+      typeof q.score === "number" ? clamp(q.score, 0, maxMarks) : defaultScoreForStatus(status, maxMarks);
     const answered = q.answered ?? status !== "missing";
     const answerPage = clamp(q.answerPage ?? 1, 1, totalPages);
 
@@ -705,8 +732,6 @@ function formatQuestions(rawQuestions: RawMappedQuestion[], totalPages: number):
       typeof region.width !== "number" ||
       typeof region.height !== "number"
     ) {
-      // No usable AI-provided region — fall back to content-length sizing
-      // using the transcribed text, rather than a fixed generic box.
       const slot = slotsUsedPerPage.get(answerPage) ?? 0;
       slotsUsedPerPage.set(answerPage, slot + 1);
       const wrapped = slot % MAX_SLOTS_PER_PAGE;

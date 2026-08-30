@@ -2,6 +2,7 @@ import type { ExtractionResult } from "./types";
 import { processFileClientSide } from "./pdf-utils";
 import { demoQuestions } from "./demo-data";
 import { parseAndMapDocumentsLocally } from "./local-extractor";
+import { buildGradingSummary } from "./grading-summary";
 
 export interface DocumentUploadPayload {
   questionFile: File | null;
@@ -24,6 +25,7 @@ export async function processQuestionAndAnswerFiles({
   }
 
   const totalAnswerPages = answerDoc?.totalPages || 4;
+  // Clean images only — these go to the UI for the highlight overlay.
   const answerPageImages = answerDoc?.pageImages || [];
 
   try {
@@ -39,6 +41,8 @@ export async function processQuestionAndAnswerFiles({
               totalPages: questionDoc.totalPages,
               // Send ALL page images so multi-page question papers work
               pageImages: questionDoc.pageImages,
+              // Gridded copies — sent to the vision model only, never shown.
+              annotatedPageImages: questionDoc.annotatedPageImages,
               pageTexts: questionDoc.pageTexts,
               fullText: questionDoc.fullText,
             }
@@ -49,6 +53,7 @@ export async function processQuestionAndAnswerFiles({
               totalPages: answerDoc.totalPages,
               // Send ALL page images so multi-page answer sheets work
               pageImages: answerDoc.pageImages,
+              annotatedPageImages: answerDoc.annotatedPageImages,
               pageTexts: answerDoc.pageTexts,
               fullText: answerDoc.fullText,
             }
@@ -64,6 +69,7 @@ export async function processQuestionAndAnswerFiles({
           totalPages: data.totalPages || totalAnswerPages,
           answerPageImages,
           extractionError: data.extractionError || undefined,
+          summary: data.summary,
         };
       }
       // API responded but returned no questions — surface the error
@@ -88,7 +94,8 @@ export async function processQuestionAndAnswerFiles({
     console.warn("API request failed, falling back to client parser:", apiErr);
   }
 
-  // Client-side local parser fallback (no API key needed)
+  // Client-side local parser fallback (no API key needed) — presence-only,
+  // so the summary is explicitly labeled as not content-graded.
   const localResult = parseAndMapDocumentsLocally({
     questionTexts: questionDoc?.pageTexts || [],
     answerTexts: answerDoc?.pageTexts || [],
@@ -103,6 +110,7 @@ export async function processQuestionAndAnswerFiles({
       questions: localResult.questions,
       totalPages: localResult.totalPages,
       answerPageImages,
+      summary: buildGradingSummary(localResult.questions, /* contentGraded */ false),
     };
   }
 
